@@ -1,0 +1,5 @@
+# Dev/test deps for the pure-logic test suite (no ML models needed).
+pytest>=8
+numpy>=1.26,<2
+httpx>=0.27,<1
+pillow>=10,<12

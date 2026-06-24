@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+data/
+data-*/
+*.db
+*.db-wal
+*.db-shm
+.env
+.pytest_cache/
+.ruff_cache/
+node_modules/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+~models/
+
+# editor / atomic-write temp files
+*.tmp
+*.tmp.*
+
+# screenshot tooling: session cookie + local capture output
+.pwtok
+bfr-*.png

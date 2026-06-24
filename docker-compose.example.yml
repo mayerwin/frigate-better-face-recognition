@@ -1,0 +1,41 @@
+# Example: run alongside Frigate. The container talks to Frigate's internal,
+# unauthenticated API at http://frigate:5000, so it must share Frigate's docker
+# network (or point FRIGATE_URL at the reachable host:port).
+services:
+  better-face-recognition:
+    # Built from source (no prebuilt image is published).
+    build: https://github.com/mayerwin/frigate-better-face-recognition.git
+    # build: .   # if you have cloned the repo locally instead
+    container_name: better-face-recognition
+    restart: unless-stopped
+    environment:
+      FRIGATE_URL: "http://frigate:5000"
+      # frigate-ext button injection (optional; needs the docker socket below).
+      # Must equal this service's container_name:port, resolvable from inside the
+      # Frigate container (we share Frigate's network), so Frigate's nginx can
+      # proxy /__betterfaces/* here:
+      BFR_UPSTREAM: "better-face-recognition:8975"
+      # FRIGATE_CONTAINER: "frigate"   # Frigate's container name (default: frigate)
+      # NGINX_AUTOCONFIG: "true"       # set false to disable the injected /faces button
+      # BFR_PUBLIC_URL: ""             # override the button's target URL wholesale
+      # BFR_FRIGATE_UI_URL: ""         # "back to Frigate" home button target (default https://<host>:8971/)
+      # Tunables below are seeded once into the DB, then managed from the UI:
+      # MATCH_THRESHOLD: "0.5"
+      # REJECT_THRESHOLD: "0.5"
+      # AUTO_REJECT: "true"      # re-apply your own "not a face" decisions
+      # AUTO_LABEL: "false"      # advanced: name strong matches without confirmation
+      # FRIGATE_WRITEBACK: "true"
+    volumes:
+      # SQLite DB (your labels + galleries) and the model cache. Back this up.
+      - ./bfr-data:/app/data
+      # Lets the tool inject its button into Frigate's /faces page via Frigate's
+      # own nginx (the frigate-ext protocol). Omit to disable; the tool still runs.
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8975:8975"
+    # Share Frigate's network so we can reach its API AND Frigate's nginx can
+    # resolve us as BFR_UPSTREAM. If Frigate is in another compose project:
+    networks: [frigate_default]
+networks:
+  frigate_default:
+    external: true

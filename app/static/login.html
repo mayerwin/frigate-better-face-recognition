@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in - Better Face Recognition</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    body { display: grid; place-items: center; min-height: 100vh; }
+    .login { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px;
+             padding: 28px; width: 320px; box-shadow: var(--shadow); }
+    .login h1 { font-size: 17px; margin: 0 0 4px; }
+    .login p { color: var(--muted); margin: 0 0 18px; font-size: 13px; }
+    .login label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+    .login input { width: 100%; background: var(--bg-elev); border: 1px solid var(--border);
+                   color: var(--text); border-radius: 8px; padding: 9px 11px; font: inherit; }
+    .login input:focus { outline: none; border-color: var(--accent); }
+    .login button { width: 100%; margin-top: 18px; background: var(--accent); color: #04201c;
+                    border: 0; border-radius: 8px; padding: 10px; font: inherit; font-weight: 700; cursor: pointer; }
+    .err { color: var(--danger); font-size: 13px; margin-top: 12px; min-height: 16px; }
+  </style>
+</head>
+<body>
+  <form class="login" id="f">
+    <h1><span class="dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--accent)"></span> Better Face Recognition</h1>
+    <p>Sign in with your Frigate account.</p>
+    <label for="u">Username</label>
+    <input id="u" autocomplete="username" autofocus />
+    <label for="p">Password</label>
+    <input id="p" type="password" autocomplete="current-password" />
+    <button type="submit">Sign in</button>
+    <div class="err" id="e"></div>
+  </form>
+  <script>
+    document.getElementById("f").addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const e = document.getElementById("e");
+      e.textContent = "";
+      try {
+        const r = await fetch("/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user: document.getElementById("u").value,
+            password: document.getElementById("p").value,
+          }),
+        });
+        if (r.ok) location.href = "/";
+        else e.textContent = "Invalid Frigate credentials.";
+      } catch (_) {
+        e.textContent = "Could not reach the server.";
+      }
+    });
+  </script>
+</body>
+</html>

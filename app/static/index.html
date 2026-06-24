@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Better Face Recognition for Frigate</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E%F0%9F%99%82%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a id="home-link" class="home" href="#" title="Back to Frigate" aria-label="Back to Frigate">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5 12 3l9 6.5"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/><path d="M9 21v-6h6v6"/></svg>
+    </a>
+    <div class="brand"><span class="dot"></span> Better Face Recognition <span class="sub">for Frigate</span></div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="review" class="active">Review <span class="badge" id="badge-review">0</span></button>
+      <button data-tab="people">People <span class="badge" id="badge-people">0</span></button>
+      <button data-tab="filtered">Filtered <span class="badge" id="badge-filtered">0</span></button>
+      <button data-tab="settings">Settings</button>
+    </nav>
+    <div class="status" id="status" title="Frigate connection + ingest status">connecting…</div>
+    <a class="gh" href="https://github.com/mayerwin/frigate-better-face-recognition" target="_blank" rel="noopener" title="View on GitHub" aria-label="GitHub repository">
+      <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"></path></svg>
+    </a>
+    <button id="logout" class="logout" title="Sign out">Sign out</button>
+  </header>
+
+  <main>
+    <section id="tab-review" class="tab-panel active">
+      <div class="panel-head">
+        <h1>Faces to review</h1>
+        <p class="hint">Genuine faces SCRFD confirmed but that aren't matched yet. Assign a person, or mark
+          <b>Not a face</b> — the next look-alike is auto-filtered. <kbd>Enter</kbd> assigns, <kbd>x</kbd> rejects the focused card.</p>
+      </div>
+      <div id="review-grid" class="grid"></div>
+      <div id="review-empty" class="empty hidden">Nothing to review. The queue is clean. 🎉</div>
+    </section>
+
+    <section id="tab-people" class="tab-panel">
+      <div class="panel-head"><h1>People</h1><p class="hint">Your Frigate face library. Anything you label here is saved straight into Frigate's own recogniser, with no separate list. Click a person to inspect and clean up all their crops.</p></div>
+      <div id="people-list" class="people"></div>
+      <div id="person-detail" class="hidden"></div>
+    </section>
+
+    <section id="tab-filtered" class="tab-panel">
+      <div class="panel-head"><h1>Filtered out</h1>
+        <p class="hint">Auto-rejected (no face / look-alike of something you called junk) and your manual rejects. Click <b>Undo</b> to send one back to review.</p></div>
+      <div id="filtered-grid" class="grid small"></div>
+      <div id="filtered-empty" class="empty hidden">Nothing filtered yet.</div>
+    </section>
+
+    <section id="tab-settings" class="tab-panel">
+      <div class="panel-head"><h1>Settings</h1><p class="hint">These settings only control how this companion triages crops and what you train into Frigate. They never change Frigate's own live face detection or recognition. Tuning is stored in the database and survives restarts.</p></div>
+      <div class="settings">
+        <label class="setting">
+          <span class="s-name">Match threshold <b id="v-match"></b></span>
+          <input type="range" id="match_threshold" min="0.20" max="0.90" step="0.01" />
+          <span class="s-help">Cosine similarity needed to suggest a known person. Higher = stricter (fewer wrong suggestions).</span>
+        </label>
+        <label class="setting">
+          <span class="s-name">Reject threshold <b id="v-reject"></b></span>
+          <input type="range" id="reject_threshold" min="0.20" max="0.90" step="0.01" />
+          <span class="s-help">Similarity to a "not a face" example needed to auto-filter a new crop. Higher = filters less aggressively.</span>
+        </label>
+        <label class="setting">
+          <span class="s-name">Auto-discard below quality <b id="v-blur"></b></span>
+          <input type="range" id="blur_threshold" min="0" max="100" step="1" />
+          <span class="s-help">0 = off. Each card shows an AI quality score "Q N" (0-100, from the eDifFIQA model) measuring how usable a face is for recognition. Crops below this are auto-discarded. Usable faces are typically 40+, junk under 20; watch the card values to choose.</span>
+        </label>
+        <label class="setting toggle">
+          <input type="checkbox" id="auto_reject" />
+          <span class="s-name">Auto-filter repeats of things you rejected</span>
+          <span class="s-help">Re-applies your own "not a face" decisions to look-alikes. Recommended on.</span>
+        </label>
+        <label class="setting toggle">
+          <input type="checkbox" id="auto_label" />
+          <span class="s-name">Auto-label high-confidence matches <em>(advanced)</em></span>
+          <span class="s-help">Off by default. When on, a strong match is named in Frigate WITHOUT your confirmation. Leave off unless you trust the galleries.</span>
+        </label>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

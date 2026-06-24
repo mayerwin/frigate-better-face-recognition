@@ -1,0 +1,8 @@
+# Normalise line endings to LF in the repo and working tree, so the Linux
+# Docker image and shell scripts are never broken by CRLF.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
