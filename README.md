@@ -51,7 +51,7 @@ Frigate (detects faces, high recall)  ──saves crops──▶  /api/faces (tr
 
 |  |  |
 | --- | --- |
-| **Review** — confirm a suggested person, reassign, or mark "not a face" | **People** — your Frigate face library, with real crop counts |
+| **Review** — confirm a suggested person, reassign, mark "not a face", or open the whole-scene snapshot (🔍) to identify someone the face crop alone can't | **People** — your Frigate face library, with real crop counts |
 | ![Review tab](docs/screenshots/review.png) | ![People tab](docs/screenshots/people.png) |
 | **Filtered** — non-faces and low-quality crops, one click back to review | **Settings** — thresholds and the quality auto-discard gate |
 | ![Filtered tab](docs/screenshots/filtered.png) | ![Settings tab](docs/screenshots/settings.png) |

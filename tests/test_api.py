@@ -10,6 +10,7 @@ class FakeFrigate:
     def __init__(self):
         self.assigned = []
         self.deleted = []
+        self.snapshots = []
 
     async def version(self):
         return "0.17.1-test"
@@ -26,16 +27,22 @@ class FakeFrigate:
         return []
 
     async def list_person_names(self):
-        return ["Jenny", "erwin"]
+        return ["Jenny", "erwin", "Jan-Peter"]
 
     async def list_faces(self):
-        return {"train": [], "Jenny": ["Jenny-100.5.webp", "Jenny-200.0.webp", "old.webp"], "erwin": []}
+        return {"train": [], "Jenny": ["Jenny-100.5.webp", "Jenny-200.0.webp", "old.webp"],
+                "erwin": [], "Jan-Peter": []}
 
     async def login_ok(self, user, password):
         return user == "admin" and password == "secret"
 
     async def fetch_crop(self, fn, folder="train"):
         return b""
+
+    async def event_snapshot(self, event_id, *, bbox=True):
+        self.snapshots.append(event_id)
+        # event ids ending in "gone" model an aged-out event Frigate has no snapshot for
+        return b"" if event_id.endswith("gone") else b"snapshotbytes"
 
     async def aclose(self):
         pass
@@ -120,6 +127,50 @@ def test_assign_reuses_existing_frigate_casing(tmp_path):
     with TestClient(app) as client:
         assert client.post(f"/api/crops/{cid}/assign", json={"name": "ERWIN"}).status_code == 200
     assert frig.assigned[0][1] == "erwin"
+
+
+def test_assign_maps_frigate_mangled_hyphen_to_existing_person(tmp_path):
+    # Frigate rewrites '-' to '_' in train-crop labels, so a crop for the person
+    # "Jan-Peter" reaches us labelled "Jan_Peter". Assigning that (issue #1) must
+    # reuse the existing hyphenated person, not create a duplicate "Jan_Peter".
+    cfg, store, frig, app = make(tmp_path)
+    cid = store.add_crop(frigate_id="1-a-2-Jan_Peter-0.8.webp", camera="", event_ts=1,
+                         det_score=0.9, has_face=True, embedding=unit(7), thumb=b"x", status="review")
+    with TestClient(app) as client:
+        r = client.post(f"/api/crops/{cid}/assign", json={"name": "Jan_Peter"})
+        assert r.status_code == 200 and r.json()["name"] == "Jan-Peter"
+    assert frig.assigned[-1][1] == "Jan-Peter"
+
+
+def test_crop_snapshot_proxies_full_scene(tmp_path):
+    # The magnifier (issue #2): /snapshot proxies Frigate's full-scene event
+    # snapshot, keyed by the event id parsed from the crop filename.
+    cfg, store, frig, app = make(tmp_path)
+    cid = store.add_crop(frigate_id="1782080480.27-bfxa4p-1782080490.83-Jenny-0.8.webp",
+                         camera="", event_ts=1, det_score=0.9, has_face=True,
+                         embedding=unit(8), thumb=b"x", status="review")
+    with TestClient(app) as client:
+        rev = client.get("/api/review").json()
+        assert rev[0]["snapshot"] == f"/api/crops/{cid}/snapshot"
+        snap = client.get(f"/api/crops/{cid}/snapshot")
+        assert snap.status_code == 200 and snap.content == b"snapshotbytes"
+    # the FULL Frigate event id (ts + rand), not just the random token
+    assert frig.snapshots == ["1782080480.27-bfxa4p"]
+
+
+def test_crop_snapshot_404_when_no_event_or_unavailable(tmp_path):
+    cfg, store, frig, app = make(tmp_path)
+    # filename with no parseable event id -> no snapshot link, endpoint 404s
+    no_ev = store.add_crop(frigate_id="weird.webp", camera="", event_ts=1, det_score=0.0,
+                           has_face=True, embedding=unit(9), thumb=b"x", status="review")
+    # event id "gone" -> Frigate has no snapshot (b"") -> 404, not 500
+    gone = store.add_crop(frigate_id="1-gone-2-Jenny-0.8.webp", camera="", event_ts=1,
+                          det_score=0.9, has_face=True, embedding=unit(10), thumb=b"x", status="review")
+    with TestClient(app) as client:
+        rows = {r["id"]: r for r in client.get("/api/review").json()}
+        assert rows[no_ev]["snapshot"] is None
+        assert client.get(f"/api/crops/{no_ev}/snapshot").status_code == 404
+        assert client.get(f"/api/crops/{gone}/snapshot").status_code == 404
 
 
 def test_auth_required_and_login(tmp_path):

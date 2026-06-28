@@ -32,6 +32,7 @@ from . import auth as authmod
 from . import nginx_inject
 from .classifier import classify
 from .config import TUNABLE_KEYS, Config
+from .frigate import label_key, parse_filename
 from .ingest import Ingestor
 from .inject_assets import INJECT_JS
 
@@ -169,12 +170,17 @@ def create_app(cfg: Config, store, embedder, frigate, *, run_ingest: bool = True
         return {p["id"]: p["name"] for p in store.list_persons()}
 
     def _view(row, names):
+        meta = parse_filename(row["frigate_id"])
         return {
             "id": row["id"],
             "image": f"/api/crops/{row['id']}/image",
+            # Full-scene snapshot of the event this face came from (the whole
+            # picture, like Frigate's faces-page magnifier); null when the
+            # filename has no parseable event id to look it up by.
+            "snapshot": f"/api/crops/{row['id']}/snapshot" if meta.event_id else None,
             "status": row["status"],
             "reason": row.get("reason") or "",
-            "frigate_label": _label_of(row["frigate_id"]),
+            "frigate_label": meta.label,
             "score": round(row["match_score"], 3) if row.get("match_score") is not None else None,
             "det_score": round(row["det_score"], 3) if row.get("det_score") is not None else None,
             "blur": round(row["blur_score"], 1) if row.get("blur_score") is not None else None,
@@ -236,6 +242,37 @@ def create_app(cfg: Config, store, embedder, frigate, *, run_ingest: bool = True
             raise HTTPException(404, "no image")
         return Response(content=thumb, media_type="image/webp",
                         headers={"Cache-Control": "public, max-age=86400"})
+
+    async def _snapshot_response(event_id: str):
+        """Proxy Frigate's full-scene event snapshot. 404s (rather than 500s)
+        when Frigate has no snapshot for the event so the UI shows a tidy
+        'unavailable' message instead of an error."""
+        if not event_id:
+            raise HTTPException(404, "no event for this crop")
+        try:
+            data = await frigate.event_snapshot(event_id)
+        except Exception as e:
+            log.warning("event snapshot %s failed: %s", event_id, e)
+            raise HTTPException(404, "snapshot unavailable")
+        if not data:
+            raise HTTPException(404, "snapshot unavailable")
+        return Response(content=data, media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=3600"})
+
+    @app.get("/api/crops/{cid}/snapshot")
+    async def crop_snapshot(cid: int):
+        # The whole picture (full camera frame) for a review/filtered crop, so
+        # you can identify the person from the scene, not just the face crop.
+        row = store.get_crop(cid)
+        if not row:
+            raise HTTPException(404, "no such crop")
+        return await _snapshot_response(parse_filename(row["frigate_id"]).event_id)
+
+    @app.get("/api/event-snapshot/{filename}")
+    async def event_snapshot(filename: str):
+        # Same full-scene snapshot, addressed by a Frigate crop filename (used by
+        # the People detail view, whose crops live only in Frigate, not our DB).
+        return await _snapshot_response(parse_filename(filename).event_id)
 
     # -------------------------------------------------------------- persons
     @app.get("/api/persons")
@@ -301,13 +338,16 @@ def create_app(cfg: Config, store, embedder, frigate, *, run_ingest: bool = True
             return float(m.group(1)) if m else 0.0
 
         ordered = sorted(files, key=_ts, reverse=True)
-        return {
-            "name": folder,
-            "crops": [
-                {"filename": f, "image": f"/api/person/{quote(folder)}/image/{quote(f)}"}
-                for f in ordered
-            ],
-        }
+
+        def _crop(f):
+            eid = parse_filename(f).event_id
+            return {
+                "filename": f,
+                "image": f"/api/person/{quote(folder)}/image/{quote(f)}",
+                "snapshot": f"/api/event-snapshot/{quote(f)}" if eid else None,
+            }
+
+        return {"name": folder, "crops": [_crop(f) for f in ordered]}
 
     @app.get("/api/person/{name}/image/{filename}")
     async def person_image(name: str, filename: str):
@@ -344,13 +384,18 @@ def create_app(cfg: Config, store, embedder, frigate, *, run_ingest: bool = True
         else:
             raise HTTPException(400, "person_id or name required")
 
-        # Reuse an existing Frigate person's exact casing to avoid duplicate
-        # folders (e.g. labelling "Erwin" maps onto an existing "erwin").
+        # Reuse an existing Frigate person to avoid duplicate folders. Match by
+        # exact casing first ("Erwin" onto an existing "erwin"), then fall back
+        # to a '-'/'_'-folded key: Frigate mangles '-' to '_' in train-crop
+        # labels, so a crop for "Jan-Peter" prefills as "Jan_Peter" and must map
+        # back onto the real person instead of creating a new "Jan_Peter".
         try:
-            for e in await frigate.list_person_names():
-                if e.lower() == name.lower():
-                    name = e
-                    break
+            existing = await frigate.list_person_names()
+            match = next((e for e in existing if e.lower() == name.lower()), None)
+            if match is None:
+                match = next((e for e in existing if label_key(e) == label_key(name)), None)
+            if match is not None:
+                name = match
         except Exception:
             pass
         pid = store.get_or_create_person(name)
@@ -449,12 +494,6 @@ def create_app(cfg: Config, store, embedder, frigate, *, run_ingest: bool = True
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     return app
-
-
-def _label_of(filename: str) -> str:
-    from .frigate import parse_filename
-
-    return parse_filename(filename).label
 
 
 def build_default_app() -> FastAPI:

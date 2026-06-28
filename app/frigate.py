@@ -14,8 +14,12 @@ wrapped:
                                              body: {"ids": ["<filename>", ...]}
 
 Train-crop filenames look like:
-  <event_ts>-<event_id>-<crop_ts>-<label>-<score>.webp
-Frigate replaces '-' inside a label with '_', so the five fields are
+  <event_ts>-<rand>-<crop_ts>-<label>-<score>.webp
+where a Frigate **event id is itself "<event_ts>-<rand>"** (a timestamp and a
+short random token joined by '-', e.g. "1782260557.077255-8eqa9h"). So the event
+id spans the first TWO dash-delimited fields; `TrainCrop.event_id` rejoins them,
+which is the form the snapshot endpoint (`/api/events/<id>/snapshot.jpg`) needs.
+Frigate replaces '-' inside a label with '_', so the remaining fields are
 unambiguous. Parsing is best-effort: an unrecognised filename is still ingested
 (only the metadata is missing), never skipped.
 """
@@ -40,11 +44,24 @@ _FN = re.compile(
 @dataclass
 class TrainCrop:
     filename: str
-    event_id: str = ""
+    event_id: str = ""  # full Frigate event id "<event_ts>-<rand>" (snapshot lookups)
     event_ts: float = 0.0
     crop_ts: float = 0.0
     label: str = ""
     score: float = 0.0
+
+
+def label_key(name: str) -> str:
+    """Normalize a person name for matching that survives Frigate's train-crop
+    mangling. Frigate rewrites '-' inside a label to '_' (the label field in a
+    crop filename is '-'-delimited), so a person enrolled as "Jan-Peter" appears
+    as "Jan_Peter" in a crop's parsed label. Folding '-' and '_' together (and
+    lower-casing) lets both map to the same key, so reconciling a parsed label
+    against the real Frigate person reuses the existing folder instead of
+    creating a spurious duplicate. Two people who differ only by '-' vs '_' are
+    indistinguishable in crop filenames anyway, so collapsing them is the best
+    (and only) recoverable behaviour."""
+    return name.strip().lower().replace("-", "_")
 
 
 def parse_filename(fn: str) -> TrainCrop:
@@ -55,7 +72,9 @@ def parse_filename(fn: str) -> TrainCrop:
     try:
         return TrainCrop(
             filename=fn,
-            event_id=m.group("eid"),
+            # A Frigate event id is "<event_ts>-<rand>"; rejoin the two raw fields
+            # exactly as written (don't reformat the float -> precision drift).
+            event_id=f"{m.group('ets')}-{m.group('eid')}",
             event_ts=float(m.group("ets")),
             crop_ts=float(m.group("cts")),
             label=m.group("label"),
@@ -94,6 +113,26 @@ class FrigateClient:
 
     async def fetch_crop(self, filename: str, folder: str = "train") -> bytes:
         r = await self._client.get(f"{self.base}/clips/faces/{quote(folder)}/{quote(filename)}")
+        r.raise_for_status()
+        return r.content
+
+    async def event_snapshot(self, event_id: str, *, bbox: bool = True) -> bytes:
+        """Full-frame snapshot for the tracked-object event a face crop came
+        from -- the whole scene, not just the face crop (Frigate's own faces
+        page shows this when you click a recognition's magnifier). The face
+        filename's middle field is that event id.
+
+        `bbox` overlays the object box while the event is still in progress;
+        once it has ended Frigate serves the snapshot per its config and the
+        params are ignored. Returns b"" when Frigate has no snapshot for the
+        event (snapshots disabled for the camera, or the event already aged
+        out), so callers can surface "unavailable" rather than a 500."""
+        params = {"bbox": 1} if bbox else None
+        r = await self._client.get(
+            f"{self.base}/api/events/{quote(event_id)}/snapshot.jpg", params=params
+        )
+        if r.status_code == 404:
+            return b""
         r.raise_for_status()
         return r.content
 

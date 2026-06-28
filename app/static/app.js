@@ -47,10 +47,16 @@ function knownNames() {
   (STATE.persons || []).forEach((p) => { if (!seen.has(p.name.toLowerCase())) seen.set(p.name.toLowerCase(), p.name); });
   return [...seen.values()].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 }
+// Fold case + '-'/'_' so a name matches its Frigate-mangled form. Frigate
+// rewrites '-' to '_' in train-crop labels, so a crop for "Jan-Peter" reaches us
+// labelled "Jan_Peter"; this lets it canonicalize back onto the real person.
+function labelKey(s) { return String(s ?? "").trim().toLowerCase().replace(/-/g, "_"); }
 function canonicalName(name) {
   if (!name) return "";
-  const hit = knownNames().find((n) => n.toLowerCase() === name.toLowerCase());
-  return hit || name;
+  const names = knownNames();
+  return names.find((n) => n.toLowerCase() === name.toLowerCase())
+    || names.find((n) => labelKey(n) === labelKey(name))
+    || name;
 }
 
 // ---------------------------------------------------------------- state
@@ -190,6 +196,7 @@ function reviewCard(it) {
   card.innerHTML = `
     <div class="thumb">
       <span class="tag">face ${it.det_score ?? "?"}${blur}</span>
+      ${zoomBtn(it.snapshot)}
       <img loading="lazy" src="${it.image}" alt="face crop" />
     </div>
     <div class="meta">
@@ -210,6 +217,7 @@ function reviewCard(it) {
   $(".assign", card).onclick = () => assign(card, input.value.trim());
   $(".warn", card).onclick = () => reject(card);
   $(".trash-btn", card).onclick = () => del(card);
+  wireZoom(card, it.snapshot);
   return card;
 }
 
@@ -264,11 +272,13 @@ async function loadFiltered() {
     const why = { no_face: "no clear face", too_blurry: "low quality", matches_reject: "look-alike of junk", not_a_face: "you rejected" }[it.reason] || it.reason;
     card.innerHTML = `
       <div class="thumb"><span class="tag">${escapeHtml(why)}</span>
+        ${zoomBtn(it.snapshot)}
         <img loading="lazy" src="${it.image}" /></div>
       <div class="actions"><div class="row">
         <button class="btn neutral" style="flex:1">Send to review</button>
         <button class="btn danger icon trash-btn" title="Delete forever">&#x1f5d1;</button>
       </div></div>`;
+    wireZoom(card, it.snapshot);
     $(".neutral", card).onclick = async () => {
       leave2(card);
       try { const r = await api(`/api/crops/${it.id}/undo`, { method: "POST" }); toast(r && r.frigate_desynced ? "Back to review (already changed in Frigate)" : "Sent back to review", "ok"); }
@@ -344,8 +354,10 @@ async function showPerson(name) {
     card.innerHTML = `
       <div class="thumb">
         <button class="trash" title="Delete this crop">&#x1f5d1;</button>
+        ${zoomBtn(c.snapshot, true)}
         <img loading="lazy" src="${c.image}" alt="crop" />
       </div>`;
+    wireZoom(card, c.snapshot);
     $(".trash", card).onclick = async () => {
       leave2(card);
       try {
@@ -394,6 +406,45 @@ function showTab(name) {
   if (name === "people") loadPeople();
   if (name === "filtered") loadFiltered();
 }
+
+// ---------------------------------------------------------------- zoom / lightbox
+// A magnifier that opens the whole-picture snapshot of the event a crop came
+// from -- the full camera frame, which often identifies a person the tight face
+// crop can't (same idea as Frigate's faces-page magnifier). `url` is null when
+// the crop has no event to look up, in which case no button is rendered.
+function zoomBtn(url, left) {
+  return url ? `<button class="zoom${left ? " left" : ""}" title="View the whole picture">&#x1f50d;</button>` : "";
+}
+function wireZoom(card, url) {
+  if (!url) return;
+  const b = $(".zoom", card);
+  if (b) b.onclick = (e) => { e.stopPropagation(); openLightbox(url); };
+}
+function openLightbox(url) {
+  let box = $("#lightbox");
+  if (!box) {
+    box = el("div", "lightbox");
+    box.id = "lightbox";
+    box.innerHTML = `<button class="lightbox-close" title="Close (Esc)">&times;</button>
+      <div class="lightbox-inner"><img alt="full snapshot" />
+        <div class="lightbox-msg hidden">Full picture unavailable — snapshots may be off for this camera, or the event has expired.</div></div>`;
+    document.body.appendChild(box);
+    box.addEventListener("click", (e) => { if (e.target === box || e.target.closest(".lightbox-close")) closeLightbox(); });
+  }
+  const img = $("img", box), msg = $(".lightbox-msg", box);
+  msg.classList.add("hidden");
+  img.classList.remove("hidden");
+  img.onerror = () => { img.classList.add("hidden"); msg.classList.remove("hidden"); };
+  img.src = url;
+  box.classList.add("show");
+  document.addEventListener("keydown", lightboxKey);
+}
+function closeLightbox() {
+  const box = $("#lightbox");
+  if (box) { box.classList.remove("show"); $("img", box).src = ""; }
+  document.removeEventListener("keydown", lightboxKey);
+}
+function lightboxKey(e) { if (e.key === "Escape") closeLightbox(); }
 
 // ---------------------------------------------------------------- helpers
 function el(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }

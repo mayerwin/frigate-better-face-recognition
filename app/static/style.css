@@ -151,6 +151,20 @@ button.btn { border: 0; border-radius: 8px; padding: 7px 11px; font: inherit; fo
 .thumb .trash:hover { opacity: 1; filter: brightness(1.1); }
 .del-person { padding: 6px 12px; }
 
+/* ---------- whole-picture magnifier ---------- */
+.thumb .zoom { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border: 0; border-radius: 8px; background: rgba(0,0,0,.6); color: #fff; cursor: pointer; font-size: 13px; line-height: 1; display: grid; place-items: center; opacity: .85; backdrop-filter: blur(2px); transition: opacity .15s ease, background .15s ease; }
+.thumb .zoom:hover { opacity: 1; background: rgba(0,0,0,.82); }
+.thumb .zoom.left { right: auto; left: 8px; }
+
+/* ---------- lightbox (whole-picture overlay) ---------- */
+.lightbox { position: fixed; inset: 0; z-index: 100; display: none; align-items: center; justify-content: center; padding: 28px; background: rgba(0,0,0,.85); backdrop-filter: blur(4px); animation: fade .15s ease; }
+.lightbox.show { display: flex; }
+.lightbox-inner { max-width: 96vw; max-height: 92vh; display: flex; align-items: center; justify-content: center; }
+.lightbox-inner img { max-width: 96vw; max-height: 92vh; object-fit: contain; border-radius: 10px; box-shadow: var(--shadow); }
+.lightbox-msg { color: var(--muted); background: var(--bg-card); border: 1px solid var(--border); padding: 18px 22px; border-radius: 10px; max-width: 420px; text-align: center; }
+.lightbox-close { position: fixed; top: 16px; right: 20px; width: 40px; height: 40px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); color: var(--text); font-size: 22px; line-height: 1; cursor: pointer; }
+.lightbox-close:hover { border-color: var(--accent); }
+
 /* ---------- person detail ---------- */
 .person-row.clickable { cursor: pointer; }
 .person-row.clickable:hover { border-color: var(--accent); }
