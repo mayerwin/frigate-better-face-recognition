@@ -24,12 +24,16 @@ def test_ext_identity_is_unique():
     assert nx.ROUTE == "/__betterfaces/"
 
 
-def test_inject_tag_is_a_bare_script_with_no_quotes_or_newline():
-    # It goes inside a single-quoted nginx string and is concatenated with others,
-    # so it must contain no single quote and no newline.
-    assert nx.INJECT_TAG == '<script src="/__betterfaces/inject.js" defer></script>'
-    assert "'" not in nx.INJECT_TAG
-    assert "\n" not in nx.INJECT_TAG
+def test_inject_tag_is_js_string_safe_and_has_no_quotes_or_newline():
+    # The tag sits in a single-quoted nginx string AND, because Frigate's
+    # sub_filter_types includes application/javascript, it can be spliced into a
+    # JS string literal in a bundle that contains "</body>" (issue #5: this
+    # blanked the Config page). So it must carry NO character that can terminate a
+    # JS string or the nginx string: no quote of any kind, no backslash, no
+    # newline. The src is therefore unquoted (valid HTML5).
+    assert nx.INJECT_TAG == '<script src=/__betterfaces/inject.js defer></script>'
+    for bad in ("'", '"', "`", "\\", "\n", "\r"):
+        assert bad not in nx.INJECT_TAG
 
 
 def test_location_conf_is_lazy_and_scoped():

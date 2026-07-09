@@ -37,9 +37,16 @@ CONF = os.environ.get("FRIGATE_NGINX_CONF", "/usr/local/nginx/conf/nginx.conf")
 # ============================= THIS EXTENSION ============================
 EXT_ID = "better-frigate-face-recognition"  # unique slug -> our filenames
 ROUTE = "/__betterfaces/"                    # unique nginx location prefix
-# Our one <script> tag. NO single quotes (it goes inside a single-quoted nginx
-# string) and NO newline (the regenerator strips CR/LF anyway).
-INJECT_TAG = '<script src="' + ROUTE + 'inject.js" defer></script>'
+# Our one <script> tag, injected via Frigate's nginx `sub_filter '</body>'`.
+# Frigate's `location /` sets `sub_filter_types text/css application/javascript`
+# (for its ingress BASE_PATH rewrite), so that sub_filter ALSO runs on JS/CSS,
+# not only HTML. Any JS bundle that carries the literal "</body>" inside a string
+# -- Frigate's Monaco ConfigEditor does -- gets our tag spliced INTO that string
+# literal. So the tag must contain NO character that can terminate a JS string or
+# the nginx string: no quote of any kind (single/double/backtick), no backslash,
+# no newline. Hence the UNQUOTED src (valid HTML5: the path has no spaces/quotes).
+# A double-quoted src here blanked Frigate's Config page -- see issue #5.
+INJECT_TAG = '<script src=' + ROUTE + 'inject.js defer></script>'
 
 CONTAINER = os.environ.get("FRIGATE_CONTAINER", "frigate")
 # Our container's name:port, resolvable from inside Frigate (we share its docker
