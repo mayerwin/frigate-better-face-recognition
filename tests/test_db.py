@@ -106,6 +106,52 @@ def test_get_or_create_person_is_case_insensitive(tmp_path):
     assert len(s.list_persons()) == 1
 
 
+def _add_aged(s, fid, status, age_days, **kw):
+    """Insert a crop, then backdate created_at by age_days for retention tests."""
+    import time as _t
+    cid = s.add_crop(frigate_id=fid, camera="c", event_ts=1, det_score=0.9,
+                     has_face=True, embedding=unit(hash(fid) % 1000), thumb=b"x",
+                     status=status, **kw)
+    with s._lock:
+        s._conn.execute("UPDATE crops SET created_at=? WHERE id=?",
+                        (_t.time() - age_days * 86400.0, cid))
+        s._conn.commit()
+    return cid
+
+
+def test_retention_prunes_only_aged_non_gallery_rows(tmp_path):
+    s = store(tmp_path)
+    pid = s.create_person("Keep")
+    # OLD rows across every status
+    _add_aged(s, "ar_old", "auto_rejected", 100, reason="no_face")
+    _add_aged(s, "del_old", "deleted", 100)
+    _add_aged(s, "rev_old", "review", 400)
+    _add_aged(s, "lab_old", "labeled", 500, person_id=pid)      # gallery -> must survive
+    _add_aged(s, "rej_old", "rejected", 500)                     # gallery -> must survive
+    _add_aged(s, "auto_lab_old", "auto_labeled", 500, person_id=pid)  # not pruned
+    # RECENT rows that must survive
+    _add_aged(s, "ar_new", "auto_rejected", 10, reason="no_face")
+    _add_aged(s, "rev_new", "review", 30)
+
+    n = s.prune_old_crops(auto_rejected_days=90, review_days=365)
+    assert n == 3  # ar_old + del_old + rev_old
+
+    left = {r for r in ("ar_old", "del_old", "rev_old", "lab_old", "rej_old",
+                        "auto_lab_old", "ar_new", "rev_new") if s.seen(r)}
+    assert left == {"lab_old", "rej_old", "auto_lab_old", "ar_new", "rev_new"}
+    # galleries intact
+    assert s.negative_gallery().shape == (1, EMB_DIM)
+    assert pid in s.positive_gallery()
+
+
+def test_retention_zero_days_disables(tmp_path):
+    s = store(tmp_path)
+    _add_aged(s, "ar", "auto_rejected", 9999, reason="no_face")
+    _add_aged(s, "rv", "review", 9999)
+    assert s.prune_old_crops(auto_rejected_days=0, review_days=0) == 0
+    assert s.seen("ar") and s.seen("rv")
+
+
 def test_list_by_statuses_single_query(tmp_path):
     s = store(tmp_path)
     s.add_crop(frigate_id="r1", camera="c", event_ts=1, det_score=0.0, has_face=False,

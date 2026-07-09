@@ -343,6 +343,43 @@ class Store:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    # Only prune enough backlog in one pass to justify a full-file VACUUM (a big
+    # first cleanup); steady-state passes delete a handful of rows and skip it.
+    _VACUUM_MIN_DELETED = 200
+
+    def prune_old_crops(self, auto_rejected_days: float = 0.0, review_days: float = 0.0) -> int:
+        """Retention: delete crops the classifier never uses once they age out, so
+        bfr.db stays bounded. Touches ONLY non-gallery statuses -- 'auto_rejected'
+        and 'deleted' tombstones (on auto_rejected_days) and 'review' (on
+        review_days). NEVER 'labeled' or 'rejected' (the human galleries) or
+        'auto_labeled'. Age is created_at (time since ingest); a value <= 0
+        disables that bucket. Returns the number of rows deleted. Rows this old
+        are long gone from Frigate's save_attempts buffer, so deleting them can't
+        cause a re-ingest."""
+        now = _now()
+        total = 0
+        with self._lock:
+            if auto_rejected_days and auto_rejected_days > 0:
+                cutoff = now - auto_rejected_days * 86400.0
+                total += self._conn.execute(
+                    "DELETE FROM crops WHERE status IN ('auto_rejected','deleted') "
+                    "AND created_at < ?",
+                    (cutoff,),
+                ).rowcount
+            if review_days and review_days > 0:
+                cutoff = now - review_days * 86400.0
+                total += self._conn.execute(
+                    "DELETE FROM crops WHERE status='review' AND created_at < ?",
+                    (cutoff,),
+                ).rowcount
+            self._conn.commit()
+            if total >= self._VACUUM_MIN_DELETED:
+                try:  # reclaim the freed pages to the OS; never let it break retention
+                    self._conn.execute("VACUUM")
+                except Exception:
+                    pass
+        return total
+
     def counts(self) -> dict:
         with self._lock:
             rows = self._conn.execute(

@@ -118,6 +118,18 @@ def test_settings_update_validates_key(tmp_path):
         assert bad.status_code == 400
 
 
+def test_retention_settings_seeded_and_coerced(tmp_path):
+    cfg, store, frig, app = make(tmp_path)
+    with TestClient(app) as client:
+        st = client.get("/api/settings").json()
+        assert st["retention_auto_rejected_days"] == 90    # default enabled
+        assert st["retention_review_days"] == 365
+        ok = client.post("/api/settings", json={"key": "retention_auto_rejected_days", "value": 45})
+        assert ok.status_code == 200 and ok.json()["retention_auto_rejected_days"] == 45
+        neg = client.post("/api/settings", json={"key": "retention_review_days", "value": -5})
+        assert neg.status_code == 200 and neg.json()["retention_review_days"] == 0  # clamps to off
+
+
 def test_assign_reuses_existing_frigate_casing(tmp_path):
     # FakeFrigate already has "erwin"; labelling "ERWIN" must reuse that exact
     # casing so a duplicate folder isn't created in Frigate.

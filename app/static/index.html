@@ -78,6 +78,16 @@
           <span class="s-name">Auto-label high-confidence matches <em>(advanced)</em></span>
           <span class="s-help">Off by default. When on, a strong match is named in Frigate WITHOUT your confirmation. Leave off unless you trust the galleries.</span>
         </label>
+        <label class="setting">
+          <span class="s-name">Delete filtered crops older than <b id="lbl-retention_auto_rejected_days"></b></span>
+          <input type="range" id="retention_auto_rejected_days" min="0" max="365" step="1" />
+          <span class="s-help">0 = keep forever. Auto-removes old <b>auto-rejected</b> (and already-deleted) crops from this tool's own database so it doesn't grow without bound. Never touches what you've trained — labeled faces and your "not a face" examples are kept forever.</span>
+        </label>
+        <label class="setting">
+          <span class="s-name">Delete un-reviewed crops older than <b id="lbl-retention_review_days"></b></span>
+          <input type="range" id="retention_review_days" min="0" max="1095" step="1" />
+          <span class="s-help">0 = keep forever. Auto-removes crops left in the <b>Review</b> queue this long (their original snapshot is long gone from Frigate by then, so they can't be re-ingested).</span>
+        </label>
       </div>
     </section>
   </main>

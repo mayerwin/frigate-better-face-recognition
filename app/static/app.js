@@ -372,12 +372,19 @@ async function showPerson(name) {
 }
 
 // ---------------------------------------------------------------- settings
+const daysFmt = (v) => (+v ? Math.round(+v) + (Math.round(+v) === 1 ? " day" : " days") : "off");
+const RETENTION_KEYS = ["retention_auto_rejected_days", "retention_review_days"];
+
 function applySettings(s) {
   if (!s) return;
   const sync = (id, val, fmt) => { const el = $("#" + id); if (el && document.activeElement !== el) { el.value = val; const lbl = $("#v-" + id.split("_")[0]); if (lbl) lbl.textContent = fmt(val); } };
   sync("match_threshold", s.match_threshold, (v) => (+v).toFixed(2));
   sync("reject_threshold", s.reject_threshold, (v) => (+v).toFixed(2));
   sync("blur_threshold", s.blur_threshold || 0, (v) => (+v ? Math.round(+v) : "off"));
+  RETENTION_KEYS.forEach((key) => {
+    const el = $("#" + key);
+    if (el && document.activeElement !== el) { el.value = s[key] || 0; const lbl = $("#lbl-" + key); if (lbl) lbl.textContent = daysFmt(s[key]); }
+  });
   if ($("#auto_reject")) $("#auto_reject").checked = !!s.auto_reject;
   if ($("#auto_label")) $("#auto_label").checked = !!s.auto_label;
 }
@@ -395,6 +402,12 @@ function wireSettings() {
   $("#blur_threshold").addEventListener("change", (e) => push("blur_threshold", +e.target.value));
   $("#auto_reject").addEventListener("change", (e) => push("auto_reject", e.target.checked));
   $("#auto_label").addEventListener("change", (e) => push("auto_label", e.target.checked));
+  RETENTION_KEYS.forEach((key) => {
+    const el = $("#" + key);
+    if (!el) return;
+    el.addEventListener("input", (e) => { const lbl = $("#lbl-" + key); if (lbl) lbl.textContent = daysFmt(e.target.value); });
+    el.addEventListener("change", (e) => push(key, +e.target.value));
+  });
 }
 
 // ---------------------------------------------------------------- tabs

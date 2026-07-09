@@ -36,7 +36,10 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 # Keys that live in the settings table and may be overridden at runtime.
-TUNABLE_KEYS = ("match_threshold", "reject_threshold", "auto_reject", "auto_label", "blur_threshold")
+TUNABLE_KEYS = (
+    "match_threshold", "reject_threshold", "auto_reject", "auto_label", "blur_threshold",
+    "retention_auto_rejected_days", "retention_review_days",
+)
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,12 @@ class Config:
     auto_reject: bool = field(default_factory=lambda: _env_bool("AUTO_REJECT", True))
     auto_label: bool = field(default_factory=lambda: _env_bool("AUTO_LABEL", False))
     blur_threshold: float = field(default_factory=lambda: _env_float("BLUR_THRESHOLD", 0.0))
+    # Retention: auto-prune crops the classifier never uses so bfr.db doesn't grow
+    # forever. Age in days; 0 = keep forever. Only ever touches non-gallery rows
+    # ('auto_rejected' + 'deleted' tombstones, and 'review'); never 'labeled' or
+    # 'rejected' (the human-built galleries).
+    retention_auto_rejected_days: float = field(default_factory=lambda: _env_float("RETENTION_AUTO_REJECTED_DAYS", 90.0))
+    retention_review_days: float = field(default_factory=lambda: _env_float("RETENTION_REVIEW_DAYS", 365.0))
 
     @property
     def db_path(self) -> str:
@@ -108,4 +117,6 @@ class Config:
             "auto_reject": self.auto_reject,
             "auto_label": self.auto_label,
             "blur_threshold": self.blur_threshold,
+            "retention_auto_rejected_days": self.retention_auto_rejected_days,
+            "retention_review_days": self.retention_review_days,
         }

@@ -51,6 +51,8 @@ class Ingestor:
         self.last_run = 0.0
         self.last_error = ""
         self.ingested = 0
+        self._last_retention = 0.0  # 0 -> first loop tick runs it, clearing any backlog
+        self.retention_interval = 6 * 3600.0  # re-check every 6h (prune is age-based)
 
     def start(self):
         self._stop.clear()
@@ -90,6 +92,7 @@ class Ingestor:
                 if await self._should_ingest():
                     await self.run_once()
                     self.last_error = ""
+                await self._maybe_run_retention()
                 await self._maybe_release_idle()
             except Exception as e:  # never let the loop die
                 self.last_error = str(e)
@@ -112,6 +115,27 @@ class Ingestor:
             return True
         settings = await asyncio.to_thread(self.store.get_settings)
         return bool(settings.get("auto_label", False))
+
+    async def _maybe_run_retention(self):
+        """Periodically prune aged-out, classifier-unused crops so bfr.db stays
+        bounded. Runs regardless of ingest activity (it's cleanup), off the event
+        loop, and never lets a failure kill the loop."""
+        now = time.time()
+        if now - self._last_retention < self.retention_interval:
+            return
+        self._last_retention = now
+        try:
+            settings = await asyncio.to_thread(self.store.get_settings)
+            ar = float(settings.get("retention_auto_rejected_days", 0) or 0)
+            rv = float(settings.get("retention_review_days", 0) or 0)
+            if ar <= 0 and rv <= 0:
+                return
+            n = await asyncio.to_thread(self.store.prune_old_crops, ar, rv)
+            if n:
+                log.info("retention pruned %d crops (auto_rejected/deleted>%.0fd, review>%.0fd)",
+                         n, ar, rv)
+        except Exception as e:
+            log.warning("retention pass failed: %s", e)
 
     async def _maybe_release_idle(self):
         e = self.embedder

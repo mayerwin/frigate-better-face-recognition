@@ -126,6 +126,8 @@ run and managed from the Settings tab afterwards (a restart won't reset them).
 | `AUTH` | `frigate` | `frigate` = sign in with your Frigate login; `none` = open |
 | `DET_THRESHOLD` | `0.5` | SCRFD detection sensitivity; lower surfaces more borderline/blurry faces |
 | `BLUR_THRESHOLD` | `0` | Auto-discard faces below this eDifFIQA quality score (0-100); 0 = off, tune in the UI |
+| `RETENTION_AUTO_REJECTED_DAYS` | `90` | Auto-delete auto-rejected (and already-deleted) crops from this tool's DB after N days; 0 = keep forever |
+| `RETENTION_REVIEW_DAYS` | `365` | Auto-delete un-reviewed crops after N days; 0 = keep forever |
 | `FIQA_VARIANT` | `l` | eDifFIQA quality model size: `t`/`s`/`m`/`l` (`l` = best/largest, `t` = 7 MB tiny) |
 | `MODEL_IDLE_TTL` | `180` | Seconds of no face scoring before the models unload to free RAM |
 | `UI_ACTIVE_WINDOW` | `30` | Seconds after the last Review poll that new crops keep being ingested |
@@ -213,6 +215,25 @@ models warm longer between sessions, or enable Auto-label to ingest continuously
 All durable state is **one SQLite file** at `/app/data/bfr.db` (your people,
 labels, embeddings, "not a face" memory, and crop thumbnails as blobs). Back up
 that file; everything else under `/app/data` is a re-downloadable model cache.
+
+### Retention
+
+The classifier only ever uses the crops **you** decided on — labelled faces
+(positive gallery) and "not a face" examples (negative gallery). Everything else
+(auto-rejected junk, un-reviewed crops, delete-forever tombstones) is triage
+history that would otherwise pile up in `bfr.db` forever. So two age-based
+retention settings auto-prune it (tune or disable them in **Settings**):
+
+- **`RETENTION_AUTO_REJECTED_DAYS`** (default `90`) — deletes auto-rejected and
+  already-deleted crops older than this.
+- **`RETENTION_REVIEW_DAYS`** (default `365`) — deletes crops left un-reviewed
+  this long.
+
+Set either to `0` to keep forever. Retention **never** touches your labelled
+faces or your "not a face" examples, so it can't affect recognition or what's
+trained into Frigate. Crops this old are long gone from Frigate's `save_attempts`
+buffer, so pruning them can't trigger a re-ingest. A large first cleanup also
+compacts the database file to hand the freed space back to the OS.
 
 ## Privacy
 

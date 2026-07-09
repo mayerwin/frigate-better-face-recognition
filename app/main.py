@@ -73,6 +73,8 @@ def _coerce_setting(key: str, value):
         return max(0.0, min(1.0, v))
     if key == "blur_threshold":
         return max(0.0, float(value))
+    if key in ("retention_auto_rejected_days", "retention_review_days"):
+        return max(0.0, float(value))  # days; 0 = keep forever
     return value
 
 
