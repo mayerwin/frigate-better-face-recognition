@@ -128,6 +128,18 @@ def create_app(cfg: Config, store, embedder, frigate, *, run_ingest: bool = True
                 app.state.frigate_version = v
         return app.state.frigate_version
 
+    # Make the browser revalidate the SPA shell + static assets every load, so a
+    # rebuilt app.js/style.css is never served stale from cache. They carry an
+    # etag + last-modified, so revalidation is a cheap 304 when unchanged. The
+    # /api image endpoints set their own long-lived Cache-Control and are untouched.
+    @app.middleware("http")
+    async def revalidate_assets(request, call_next):
+        resp = await call_next(request)
+        p = request.url.path
+        if p == "/" or p.startswith("/static/"):
+            resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
     # ---- auth (optional; piggybacks on Frigate's user database) ----
     secret = authmod.load_secret(cfg.data_dir) if cfg.auth == "frigate" else b""
 

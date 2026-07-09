@@ -118,6 +118,14 @@ def test_settings_update_validates_key(tmp_path):
         assert bad.status_code == 400
 
 
+def test_static_and_index_revalidate(tmp_path):
+    # app.js/style.css must revalidate so a rebuilt UI is never served stale.
+    cfg, store, frig, app = make(tmp_path)
+    with TestClient(app) as client:
+        assert client.get("/").headers.get("cache-control") == "no-cache"
+        assert client.get("/static/app.js").headers.get("cache-control") == "no-cache"
+
+
 def test_retention_settings_seeded_and_coerced(tmp_path):
     cfg, store, frig, app = make(tmp_path)
     with TestClient(app) as client:

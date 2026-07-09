@@ -372,8 +372,12 @@ async function showPerson(name) {
 }
 
 // ---------------------------------------------------------------- settings
-const daysFmt = (v) => (+v ? Math.round(+v) + (Math.round(+v) === 1 ? " day" : " days") : "off");
 const RETENTION_KEYS = ["retention_auto_rejected_days", "retention_review_days"];
+// The note beside a retention field: only "off — keeping everything" at 0.
+function retNote(key, val) {
+  const n = $("#note-" + key);
+  if (n) n.textContent = Math.round(+val || 0) === 0 ? "off — keeping everything" : "";
+}
 
 function applySettings(s) {
   if (!s) return;
@@ -383,7 +387,10 @@ function applySettings(s) {
   sync("blur_threshold", s.blur_threshold || 0, (v) => (+v ? Math.round(+v) : "off"));
   RETENTION_KEYS.forEach((key) => {
     const el = $("#" + key);
-    if (el && document.activeElement !== el) { el.value = s[key] || 0; const lbl = $("#lbl-" + key); if (lbl) lbl.textContent = daysFmt(s[key]); }
+    if (!el) return;
+    const v = Math.round(s[key] || 0);
+    if (document.activeElement !== el) el.value = v;
+    retNote(key, document.activeElement === el ? el.value : v);
   });
   if ($("#auto_reject")) $("#auto_reject").checked = !!s.auto_reject;
   if ($("#auto_label")) $("#auto_label").checked = !!s.auto_label;
@@ -405,8 +412,13 @@ function wireSettings() {
   RETENTION_KEYS.forEach((key) => {
     const el = $("#" + key);
     if (!el) return;
-    el.addEventListener("input", (e) => { const lbl = $("#lbl-" + key); if (lbl) lbl.textContent = daysFmt(e.target.value); });
-    el.addEventListener("change", (e) => push(key, +e.target.value));
+    el.addEventListener("input", () => retNote(key, el.value));
+    el.addEventListener("change", () => {
+      const v = Math.max(0, Math.round(+el.value || 0));  // days, non-negative integer
+      el.value = v;
+      retNote(key, v);
+      push(key, v);
+    });
   });
 }
 
