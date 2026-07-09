@@ -118,12 +118,18 @@ def test_settings_update_validates_key(tmp_path):
         assert bad.status_code == 400
 
 
-def test_static_and_index_revalidate(tmp_path):
-    # app.js/style.css must revalidate so a rebuilt UI is never served stale.
+def test_shell_is_content_hash_busted_and_revalidates(tmp_path):
+    # The SPA shell must revalidate AND reference content-hashed asset URLs, so a
+    # rebuilt app.js/style.css busts the browser cache with no hard refresh.
     cfg, store, frig, app = make(tmp_path)
     with TestClient(app) as client:
-        assert client.get("/").headers.get("cache-control") == "no-cache"
+        idx = client.get("/")
+        assert idx.headers.get("cache-control") == "no-cache"
+        assert "/static/app.js?v=" in idx.text and "/static/style.css?v=" in idx.text
         assert client.get("/static/app.js").headers.get("cache-control") == "no-cache"
+        lg = client.get("/login")   # login shell busted + revalidated too
+        assert lg.headers.get("cache-control") == "no-cache"
+        assert "/static/style.css?v=" in lg.text
 
 
 def test_retention_settings_seeded_and_coerced(tmp_path):

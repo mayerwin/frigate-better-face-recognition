@@ -14,17 +14,19 @@ Human-in-the-loop policy, enforced here:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
 import time
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from typing import Optional
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -38,6 +40,29 @@ from .inject_assets import INJECT_JS
 
 log = logging.getLogger("bfr.api")
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+
+def _asset_version(name: str) -> str:
+    """Short content hash of a static asset, used to cache-bust its URL."""
+    try:
+        with open(os.path.join(STATIC_DIR, name), "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()[:10]
+    except OSError:
+        return ""
+
+
+@lru_cache(maxsize=8)
+def _shell_html(name: str) -> str:
+    """The SPA shell (index/login) with content-hashed asset URLs, so a rebuilt
+    app.js/style.css busts the browser cache on its own and nobody has to hard
+    refresh. Cached per process; the static files don't change while it runs."""
+    with open(os.path.join(STATIC_DIR, name), "r", encoding="utf-8") as f:
+        html = f.read()
+    for asset in ("app.js", "style.css"):
+        v = _asset_version(asset)
+        if v:
+            html = html.replace("/static/" + asset, "/static/" + asset + "?v=" + v)
+    return html
 
 
 class AssignBody(BaseModel):
@@ -161,7 +186,7 @@ def create_app(cfg: Config, store, embedder, frigate, *, run_ingest: bool = True
 
     @app.get("/login")
     async def login_page():
-        return FileResponse(os.path.join(STATIC_DIR, "login.html"))
+        return HTMLResponse(_shell_html("login.html"), headers={"Cache-Control": "no-cache"})
 
     @app.post("/login")
     async def login(body: LoginBody):
@@ -502,7 +527,7 @@ def create_app(cfg: Config, store, embedder, frigate, *, run_ingest: bool = True
 
     @app.get("/")
     async def index():
-        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+        return HTMLResponse(_shell_html("index.html"), headers={"Cache-Control": "no-cache"})
 
     if os.path.isdir(STATIC_DIR):
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

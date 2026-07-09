@@ -78,24 +78,28 @@
           <span class="s-name">Auto-label high-confidence matches <em>(advanced)</em></span>
           <span class="s-help">Off by default. When on, a strong match is named in Frigate WITHOUT your confirmation. Leave off unless you trust the galleries.</span>
         </label>
-        <label class="setting">
-          <span class="s-name">Delete filtered crops older than</span>
-          <div class="num-field">
-            <input type="number" id="retention_auto_rejected_days" min="0" max="3650" step="1" inputmode="numeric" />
-            <span class="unit">days</span>
-            <span class="num-note" id="note-retention_auto_rejected_days"></span>
+        <div class="setting">
+          <div class="ret-row">
+            <input type="checkbox" id="ret_ar_on" class="ret-toggle" />
+            <label for="ret_ar_on" class="s-name">Delete old <b>filtered</b> crops after</label>
+            <span class="num-field">
+              <input type="number" id="retention_auto_rejected_days" min="1" max="3650" step="1" inputmode="numeric" data-default="90" />
+              <span class="unit">days</span>
+            </span>
           </div>
-          <span class="s-help"><b>0 = keep forever.</b> Auto-removes old <b>auto-rejected</b> (and already-deleted) crops from this tool's own database so it doesn't grow without bound. Never touches what you've trained — labeled faces and your "not a face" examples are kept forever.</span>
-        </label>
-        <label class="setting">
-          <span class="s-name">Delete un-reviewed crops older than</span>
-          <div class="num-field">
-            <input type="number" id="retention_review_days" min="0" max="3650" step="1" inputmode="numeric" />
-            <span class="unit">days</span>
-            <span class="num-note" id="note-retention_review_days"></span>
+          <span class="s-help">Auto-removes old <b>auto-rejected</b> (and already-deleted) crops from this tool's own database so it doesn't grow without bound. Never touches what you've trained: labeled faces and your "not a face" examples are always kept.</span>
+        </div>
+        <div class="setting">
+          <div class="ret-row">
+            <input type="checkbox" id="ret_rv_on" class="ret-toggle" />
+            <label for="ret_rv_on" class="s-name">Delete <b>un-reviewed</b> crops after</label>
+            <span class="num-field">
+              <input type="number" id="retention_review_days" min="1" max="3650" step="1" inputmode="numeric" data-default="365" />
+              <span class="unit">days</span>
+            </span>
           </div>
-          <span class="s-help"><b>0 = keep forever.</b> Auto-removes crops left in the <b>Review</b> queue this long (their original snapshot is long gone from Frigate by then, so they can't be re-ingested).</span>
-        </label>
+          <span class="s-help">Auto-removes crops left in the <b>Review</b> queue this long (their original snapshot is long gone from Frigate by then, so they can't be re-ingested).</span>
+        </div>
       </div>
     </section>
   </main>

@@ -372,12 +372,14 @@ async function showPerson(name) {
 }
 
 // ---------------------------------------------------------------- settings
-const RETENTION_KEYS = ["retention_auto_rejected_days", "retention_review_days"];
-// The note beside a retention field: only "off — keeping everything" at 0.
-function retNote(key, val) {
-  const n = $("#note-" + key);
-  if (n) n.textContent = Math.round(+val || 0) === 0 ? "off — keeping everything" : "";
-}
+// Retention: one stored value per key where 0 means "keep forever". The UI shows
+// that as a checkbox (on = keep-for-N-days) plus a days field, so users never
+// type 0 as a magic value; behind the scenes an unchecked box just saves 0.
+const RETENTION = [
+  { key: "retention_auto_rejected_days", box: "ret_ar_on" },
+  { key: "retention_review_days", box: "ret_rv_on" },
+];
+function retClamp(input) { return Math.max(1, Math.round(+input.value || +input.dataset.default || 90)); }
 
 function applySettings(s) {
   if (!s) return;
@@ -385,12 +387,12 @@ function applySettings(s) {
   sync("match_threshold", s.match_threshold, (v) => (+v).toFixed(2));
   sync("reject_threshold", s.reject_threshold, (v) => (+v).toFixed(2));
   sync("blur_threshold", s.blur_threshold || 0, (v) => (+v ? Math.round(+v) : "off"));
-  RETENTION_KEYS.forEach((key) => {
-    const el = $("#" + key);
-    if (!el) return;
-    const v = Math.round(s[key] || 0);
-    if (document.activeElement !== el) el.value = v;
-    retNote(key, document.activeElement === el ? el.value : v);
+  RETENTION.forEach(({ key, box }) => {
+    const input = $("#" + key), cb = $("#" + box);
+    if (!input || !cb) return;
+    const v = Math.round(s[key] || 0), on = v > 0;
+    if (document.activeElement !== cb) cb.checked = on;
+    if (document.activeElement !== input) input.value = on ? v : (input.dataset.default || "");
   });
   if ($("#auto_reject")) $("#auto_reject").checked = !!s.auto_reject;
   if ($("#auto_label")) $("#auto_label").checked = !!s.auto_label;
@@ -409,15 +411,17 @@ function wireSettings() {
   $("#blur_threshold").addEventListener("change", (e) => push("blur_threshold", +e.target.value));
   $("#auto_reject").addEventListener("change", (e) => push("auto_reject", e.target.checked));
   $("#auto_label").addEventListener("change", (e) => push("auto_label", e.target.checked));
-  RETENTION_KEYS.forEach((key) => {
-    const el = $("#" + key);
-    if (!el) return;
-    el.addEventListener("input", () => retNote(key, el.value));
-    el.addEventListener("change", () => {
-      const v = Math.max(0, Math.round(+el.value || 0));  // days, non-negative integer
-      el.value = v;
-      retNote(key, v);
-      push(key, v);
+  RETENTION.forEach(({ key, box }) => {
+    const input = $("#" + key), cb = $("#" + box);
+    if (!input || !cb) return;
+    cb.addEventListener("change", () => {
+      if (cb.checked) { const v = retClamp(input); input.value = v; push(key, v); input.focus(); }
+      else push(key, 0);  // unchecked -> keep forever
+    });
+    input.addEventListener("change", () => {
+      const v = retClamp(input);
+      input.value = v;
+      if (cb.checked) push(key, v);
     });
   });
 }

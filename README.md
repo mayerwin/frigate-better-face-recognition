@@ -218,22 +218,24 @@ that file; everything else under `/app/data` is a re-downloadable model cache.
 
 ### Retention
 
-The classifier only ever uses the crops **you** decided on — labelled faces
+The classifier only ever uses the crops **you** decided on: labelled faces
 (positive gallery) and "not a face" examples (negative gallery). Everything else
 (auto-rejected junk, un-reviewed crops, delete-forever tombstones) is triage
 history that would otherwise pile up in `bfr.db` forever. So two age-based
 retention settings auto-prune it (tune or disable them in **Settings**):
 
-- **`RETENTION_AUTO_REJECTED_DAYS`** (default `90`) — deletes auto-rejected and
+- **`RETENTION_AUTO_REJECTED_DAYS`** (default `90`): deletes auto-rejected and
   already-deleted crops older than this.
-- **`RETENTION_REVIEW_DAYS`** (default `365`) — deletes crops left un-reviewed
+- **`RETENTION_REVIEW_DAYS`** (default `365`): deletes crops left un-reviewed
   this long.
 
-Set either to `0` to keep forever. Retention **never** touches your labelled
-faces or your "not a face" examples, so it can't affect recognition or what's
-trained into Frigate. Crops this old are long gone from Frigate's `save_attempts`
-buffer, so pruning them can't trigger a re-ingest. A large first cleanup also
-compacts the database file to hand the freed space back to the OS.
+In the UI each is a checkbox (on by default) with a day count; unticking it keeps
+those crops forever (the env vars use `0` for the same thing). Retention **never**
+touches your labelled faces or your "not a face" examples, so it can't affect
+recognition or what's trained into Frigate. Crops this old are long gone from
+Frigate's `save_attempts` buffer, so pruning them can't trigger a re-ingest. A
+large first cleanup also compacts the database file to hand freed space back to
+the OS.
 
 ## Privacy
 
