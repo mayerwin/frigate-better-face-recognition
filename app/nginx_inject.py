@@ -122,7 +122,7 @@ def apply_script() -> str:
 
     Reloading unconditionally is not harmless: each `nginx -s reload` grows
     Frigate's nginx master RSS (~240 KB/reload measured on nginx 1.27.4 in Frigate
-    0.18), so a 30s backstop that always reloaded ran it out of memory in days."""
+    0.18), so a 30s timer that always reloaded (the old design) ran it out of memory in days."""
     loc_line = "        include " + LOCATION_DIR + "/*.conf; " + MANAGED
     gen_line = "            include " + GEN_DIR + "/*.conf; " + MANAGED
     awk_loc = (
@@ -186,14 +186,8 @@ async def _locked_sh(script: str) -> bytes:
 
 
 # ------------------------------------------------------- apply (idempotent + safe)
-# A failing apply rolls back and reloads, so retrying it every 30s would bring
-# back the reload churn. Timer-driven retries back off instead (30s -> 30min).
-_failures = 0
-_next_timer_try = 0.0
-
-
 async def ensure() -> None:
-    global _busy, _failures, _next_timer_try
+    global _busy
     if not AUTO or _busy:
         return
     _busy = True
@@ -205,12 +199,8 @@ async def ensure() -> None:
             else:
                 log.info("injected into %s nginx (route %s -> %s)", CONTAINER, ROUTE, UPSTREAM)
         _state.update(mode="managed", applied=True, last_error=None)
-        _failures = 0
-        _next_timer_try = 0.0
     except Exception as e:  # noqa: BLE001 - best-effort integrator, never fatal
         _state.update(applied=False, last_error=str(e))
-        _failures += 1
-        _next_timer_try = time.monotonic() + min(30.0 * 2 ** _failures, 1800.0)
         log.warning("nginx ensure failed: %s", e)
     finally:
         _busy = False
@@ -232,11 +222,20 @@ def _manual_hint() -> None:
                 LOCATION_DIR, EXT_ID, ROUTE, UPSTREAM)
 
 
+SAFETY_NET_SECONDS = 3600
+
+
 # ------------------------------------------------------- lifecycle
 async def run() -> None:
     """Full lifecycle; launch as a background task so it never blocks startup.
-    Applies once (with retry), then re-applies on every Frigate (re)start and on a
-    ~30s backstop timer. Cancellation-safe."""
+    Event-driven, no polling: applies once (with retry), then re-applies on every
+    Frigate container start, plus an hourly safety net. Cancellation-safe.
+
+    Why events are enough: Frigate's nginx.conf comes only from its image. An nginx
+    restart inside the container (s6) regenerates base_path.conf and listen.conf,
+    not nginx.conf, and a container restart keeps the writable layer. So our edits
+    are lost only when the container is RECREATED (an upgrade), which always emits
+    a Docker `start` event."""
     if not AUTO:
         _state["mode"] = "disabled"
         _manual_hint()
@@ -248,18 +247,19 @@ async def run() -> None:
         _manual_hint()
         return
 
-    await _ensure_with_retry()
-
-    async def watch_restarts() -> None:
-        # Re-apply whenever the Frigate container (re)starts: an upgrade recreates
-        # it from a fresh image and wipes the includes + frigate-ext dir. Match by
-        # the event ACTOR name -- NOT `--filter container=<name>`, which binds to
-        # the current id and misses the recreated container.
+    async def watch_starts() -> None:
+        # Match by the event ACTOR name -- NOT `--filter container=<name>`, which
+        # binds to the current id and misses the recreated container. If the
+        # stream drops, reconnect with --since so a start meanwhile is replayed.
+        since: int | None = None
         while True:
+            args = ["events", "--filter", "type=container", "--filter", "event=start",
+                    "--format", "{{.Actor.Attributes.name}}"]
+            if since is not None:
+                args += ["--since", str(since)]
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    "docker", "events", "--filter", "type=container",
-                    "--filter", "event=start", "--format", "{{.Actor.Attributes.name}}",
+                    "docker", *args,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
                 )
                 assert proc.stdout is not None
@@ -273,19 +273,22 @@ async def run() -> None:
                 raise
             except Exception as e:  # noqa: BLE001
                 log.debug("docker events watch error: %s", e)
+            since = int(time.time()) - 1
             await asyncio.sleep(5)
 
-    async def backstop() -> None:
-        # Reliable backstop if an event is ever missed: ensure() re-reads live
-        # state, so a missing injection self-heals within ~30s regardless. When
-        # nothing drifted it is one `docker exec` that changes nothing and no reload.
+    async def apply_then_safety_net() -> None:
+        await _ensure_with_retry()
+        # Covers the unforeseen (a manual edit, a future Frigate that rebuilds
+        # nginx.conf on nginx restart). One `docker exec`; ensure() reloads nginx
+        # only if something changed.
         while True:
-            await asyncio.sleep(30)
-            if time.monotonic() >= _next_timer_try:
-                await ensure()
+            await asyncio.sleep(SAFETY_NET_SECONDS)
+            await ensure()
 
+    # The watcher starts first, so a Frigate start during the initial apply
+    # is not missed.
     try:
-        await asyncio.gather(watch_restarts(), backstop())
+        await asyncio.gather(watch_starts(), apply_then_safety_net())
     except asyncio.CancelledError:
         pass
 
