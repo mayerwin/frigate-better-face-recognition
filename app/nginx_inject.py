@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 
 log = logging.getLogger("bfr.nginx")
 
@@ -83,25 +84,45 @@ def location_conf() -> str:
     ])
 
 
-# Byte-identical to every other extension's regen (so concurrent runs converge):
-# concatenate all inject/*.html (sorted by the shell glob), strip CR/LF, and wrap
-# them in ONE `sub_filter '</body>' '<all tags></body>';`. If no tags remain,
-# remove the file (empty *.conf glob is valid nginx).
+# Byte-identical OUTPUT to every other extension's regen (so concurrent runs
+# converge): concatenate all inject/*.html (sorted by the shell glob), strip CR/LF,
+# and wrap them in ONE `sub_filter '</body>' '<all tags></body>';`. If no tags
+# remain, remove the file (empty *.conf glob is valid nginx). The new content is
+# compared before replacing, so an unchanged set of tags is not a change (C=1
+# marks that this pass changed something and nginx must reload).
 _REGEN = (
-    "T=$(cat '" + INJECT_DIR + "/'*.html 2>/dev/null | tr -d '\\r\\n'); "
+    "T=$(cat '" + INJECT_DIR + "/'*.html 2>/dev/null | tr -d '\\r\\n'); F='" + GEN_DIR + "/subfilter.conf'; "
     "if [ -n \"$T\" ]; then "
-    "printf \"sub_filter '</body>' '%s</body>';\\n\" \"$T\" "
-    "> '" + GEN_DIR + "/subfilter.conf.t' && mv '" + GEN_DIR + "/subfilter.conf.t' '" + GEN_DIR + "/subfilter.conf'; "
-    "else rm -f '" + GEN_DIR + "/subfilter.conf'; fi"
+    "printf \"sub_filter '</body>' '%s</body>';\\n\" \"$T\" > \"$F.t\" && "
+    "if cmp -s \"$F.t\" \"$F\"; then rm -f \"$F.t\"; else mv \"$F.t\" \"$F\"; C=1; fi; "
+    "elif [ -e \"$F\" ]; then rm -f \"$F\"; C=1; fi"
 )
+
+# put FILE CONTENT: write only if the bytes differ (atomic tmp + mv), and mark the
+# pass as changed.
+_PUT_FN = (
+    "put() { printf '%s' \"$2\" > \"$1.t\" && "
+    "if cmp -s \"$1.t\" \"$1\"; then rm -f \"$1.t\"; else mv \"$1.t\" \"$1\"; C=1; fi; }"
+)
+
+
+def _shq(s: str) -> str:
+    """Single-quote a value for sh (our content contains `$` and double quotes)."""
+    return "'" + s.replace("'", "'\\''") + "'"
 
 
 # ------------------------------------------------------- the locked critical section
 def apply_script() -> str:
-    """One flock'd shell pass: migrate our legacy v1 file, ensure the two include
-    lines (idempotent grep -F), regenerate the single combined sub_filter, then
-    validate + reload (rolling back ONLY our own two inputs on failure). awk uses
-    index() with literal substrings so there is no regex escaping to get wrong."""
+    """One flock'd shell pass: write our two inputs, migrate our legacy v1 file,
+    ensure the two include lines (idempotent grep -F), regenerate the single
+    combined sub_filter. Every step records whether it changed anything on disk,
+    and nginx is validated + reloaded ONLY if something did (rolling back ONLY our
+    own two inputs on a failed `nginx -t`). awk uses index() with literal
+    substrings so there is no regex escaping to get wrong.
+
+    Reloading unconditionally is not harmless: each `nginx -s reload` grows
+    Frigate's nginx master RSS (~240 KB/reload measured on nginx 1.27.4 in Frigate
+    0.18), so a 30s backstop that always reloaded ran it out of memory in days."""
     loc_line = "        include " + LOCATION_DIR + "/*.conf; " + MANAGED
     gen_line = "            include " + GEN_DIR + "/*.conf; " + MANAGED
     awk_loc = (
@@ -114,20 +135,26 @@ def apply_script() -> str:
         'if (!S && index($0, "root /opt/frigate/web")) { print "' + gen_line + '"; S=1 } '
         "}' '" + CONF + "' > '" + CONF + ".bfr.t' && mv '" + CONF + ".bfr.t' '" + CONF + "'"
     )
+    v1 = EXT_ROOT + "/subfilters/" + EXT_ID + ".conf"
     return "\n".join([
+        "C=0",
+        _PUT_FN,
         "mkdir -p '" + INJECT_DIR + "' '" + LOCATION_DIR + "' '" + GEN_DIR + "'",
+        "put '" + INJECT_DIR + "/" + EXT_ID + ".html' " + _shq(INJECT_TAG),
+        "put '" + LOCATION_DIR + "/" + EXT_ID + ".conf' " + _shq(location_conf()),
         # migrate: our v1 wrote a per-ext sub_filter here; the combined one supersedes it
-        "rm -f '" + EXT_ROOT + "/subfilters/" + EXT_ID + ".conf'",
+        "if [ -e '" + v1 + "' ]; then rm -f '" + v1 + "'; C=1; fi",
         # idempotent include lines (checked individually so an upgrade adds a missing one)
         "if ! grep -qF 'frigate-ext/locations/*.conf' '" + CONF + "'; then",
-        "  " + awk_loc,
+        "  " + awk_loc + "; C=1",
         "fi",
         "if ! grep -qF 'frigate-ext/generated/*.conf' '" + CONF + "'; then",
-        "  " + awk_gen,
+        "  " + awk_gen + "; C=1",
         "fi",
         _REGEN,
+        'if [ "$C" = 0 ]; then echo BFR_UNCHANGED; exit 0; fi',
         "if nginx -t 2>/tmp/bfr-nginxt; then",
-        "  nginx -s reload 2>/dev/null; echo BFR_OK",
+        "  nginx -s reload 2>/dev/null; echo BFR_RELOADED",
         "else",
         "  rm -f '" + INJECT_DIR + "/" + EXT_ID + ".html' '" + LOCATION_DIR + "/" + EXT_ID + ".conf'",
         "  " + _REGEN,
@@ -158,29 +185,32 @@ async def _locked_sh(script: str) -> bytes:
     return await _docker(["exec", CONTAINER, "flock", "-w", "30", LOCK, "sh", "-c", script])
 
 
-# Atomic write of an input file (mkdir -p parent, tmp + mv) so nginx never sees a
-# half file. No lock needed: distinct filename per extension.
-async def _write_file(path: str, content: str) -> bytes:
-    d = path.rsplit("/", 1)[0]
-    script = "mkdir -p '" + d + "' && cat > '" + path + ".tmp' && mv '" + path + ".tmp' '" + path + "'"
-    return await _docker(["exec", "-i", CONTAINER, "sh", "-c", script], content.encode("utf-8"))
-
-
 # ------------------------------------------------------- apply (idempotent + safe)
+# A failing apply rolls back and reloads, so retrying it every 30s would bring
+# back the reload churn. Timer-driven retries back off instead (30s -> 30min).
+_failures = 0
+_next_timer_try = 0.0
+
+
 async def ensure() -> None:
-    global _busy
+    global _busy, _failures, _next_timer_try
     if not AUTO or _busy:
         return
     _busy = True
     try:
-        await _write_file(INJECT_DIR + "/" + EXT_ID + ".html", INJECT_TAG)  # no trailing newline
-        await _write_file(LOCATION_DIR + "/" + EXT_ID + ".conf", location_conf())
-        await _locked_sh(apply_script())
-        if not _state["applied"]:
-            log.info("injected into %s nginx (route %s -> %s)", CONTAINER, ROUTE, UPSTREAM)
+        out = await _locked_sh(apply_script())
+        if b"BFR_RELOADED" in out:
+            if _state["applied"]:
+                log.info("nginx injection drifted; re-applied and reloaded %s nginx", CONTAINER)
+            else:
+                log.info("injected into %s nginx (route %s -> %s)", CONTAINER, ROUTE, UPSTREAM)
         _state.update(mode="managed", applied=True, last_error=None)
+        _failures = 0
+        _next_timer_try = 0.0
     except Exception as e:  # noqa: BLE001 - best-effort integrator, never fatal
         _state.update(applied=False, last_error=str(e))
+        _failures += 1
+        _next_timer_try = time.monotonic() + min(30.0 * 2 ** _failures, 1800.0)
         log.warning("nginx ensure failed: %s", e)
     finally:
         _busy = False
@@ -247,10 +277,12 @@ async def run() -> None:
 
     async def backstop() -> None:
         # Reliable backstop if an event is ever missed: ensure() re-reads live
-        # state, so a missing injection self-heals within ~30s regardless.
+        # state, so a missing injection self-heals within ~30s regardless. When
+        # nothing drifted it is one `docker exec` that changes nothing and no reload.
         while True:
             await asyncio.sleep(30)
-            await ensure()
+            if time.monotonic() >= _next_timer_try:
+                await ensure()
 
     try:
         await asyncio.gather(watch_restarts(), backstop())
