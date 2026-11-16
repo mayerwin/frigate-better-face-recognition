@@ -78,6 +78,7 @@ def test_state_and_review_and_image(tmp_path):
         assert st["frigate"]["version"] == "0.17.1-test"
         rev = client.get("/api/review").json()
         assert len(rev) == 1 and rev[0]["id"] == cid
+        assert rev[0]["frigate_label"] == "unknown" and rev[0]["frigate_score"] == 0.6
         img = client.get(f"/api/crops/{cid}/image")
         assert img.status_code == 200 and img.content == b"webpbytes"
 
@@ -250,3 +251,16 @@ def test_undo_returns_to_review(tmp_path):
         r = client.post(f"/api/crops/{cid}/undo")
         assert r.status_code == 200
     assert store.get_crop(cid)["status"] == "review"
+
+
+def test_review_exposes_frigate_score_for_known_label(tmp_path):
+    cfg, store, frig, app = make(tmp_path)
+    store.add_crop(frigate_id="1782080480.27-bfxa4p-1782080490.83-Jenny-0.93.webp", camera="",
+                   event_ts=1.0, det_score=0.9, has_face=True, embedding=unit(3),
+                   thumb=b"x", status="review")
+    store.add_crop(frigate_id="weird-name.webp", camera="", event_ts=2.0, det_score=0.9,
+                   has_face=True, embedding=unit(4), thumb=b"x", status="review")
+    with TestClient(app) as client:
+        rev = {r["frigate_label"]: r for r in client.get("/api/review").json()}
+    assert rev["Jenny"]["frigate_score"] == 0.93
+    assert rev[""]["frigate_score"] is None

@@ -220,6 +220,10 @@ def create_app(cfg: Config, store, embedder, frigate, *, run_ingest: bool = True
             "status": row["status"],
             "reason": row.get("reason") or "",
             "frigate_label": meta.label,
+            # Frigate's own recognition score from the crop filename (0-1); null
+            # when the filename didn't parse. Frigate's docs advise against
+            # training faces it already recognises at 90%+.
+            "frigate_score": round(meta.score, 3) if meta.label else None,
             "score": round(row["match_score"], 3) if row.get("match_score") is not None else None,
             "det_score": round(row["det_score"], 3) if row.get("det_score") is not None else None,
             "blur": round(row["blur_score"], 1) if row.get("blur_score") is not None else None,

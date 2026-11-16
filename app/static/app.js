@@ -185,11 +185,17 @@ async function loadReview() {
   items.forEach((it) => grid.appendChild(reviewCard(it)));
 }
 
+const CONFIDENT_SCORE = 0.9;
+
 function reviewCard(it) {
   const card = el("div", "card");
   card.dataset.id = it.id;
-  const fr = it.frigate_label && it.frigate_label !== "unknown"
-    ? ` · Frigate: ${escapeHtml(canonicalName(it.frigate_label))}` : "";
+  const known = it.frigate_label && it.frigate_label !== "unknown";
+  const pct = it.frigate_score != null ? ` ${Math.round(it.frigate_score * 100)}%` : "";
+  const fr = known ? ` · Frigate: ${escapeHtml(canonicalName(it.frigate_label))}${pct}` : "";
+  // Frigate's training guidance: faces it already recognises at 90%+ add little
+  // and push towards over-fitting, so say so instead of inviting an Assign.
+  const confident = known && it.frigate_score != null && it.frigate_score >= CONFIDENT_SCORE;
   const guess = it.suggested || (it.frigate_label && it.frigate_label !== "unknown" ? it.frigate_label : "");
   const prefill = canonicalName(guess);
   const blur = it.blur != null ? ` · Q ${Math.round(it.blur)}` : "";
@@ -202,12 +208,13 @@ function reviewCard(it) {
     <div class="meta">
       <div>${ago(it.event_ts)}${fr}</div>
       ${it.suggested ? `<div class="suggest">Looks like ${escapeHtml(canonicalName(it.suggested))} (${it.score})</div>` : ""}
+      ${confident ? `<div class="confident" title="Training faces Frigate already recognises confidently adds little and can over-fit">Frigate is already sure: no need to train this one (🗑 clears it)</div>` : ""}
     </div>
     <div class="actions">
       <div class="row">
         <button class="btn assign" style="flex:1">Assign</button>
-        <button class="btn warn" title="Not a real face to keep">Not a face</button>
-        <button class="btn danger icon trash-btn" title="Delete forever (removes the shot)">&#x1f5d1;</button>
+        <button class="btn warn" title="Not a face at all (a wheel, a shadow): look-alikes get auto-filtered">Not a face</button>
+        <button class="btn danger icon trash-btn" title="Delete forever: for real faces too poor to train (blurry, cropped, side view)">&#x1f5d1;</button>
       </div>
     </div>`;
   const actions = $(".actions", card);

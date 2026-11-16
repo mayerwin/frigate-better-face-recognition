@@ -69,6 +69,24 @@ So the only automatic write to Frigate is the opt-in **Auto-label**. Everything
 else this tool decides on its own (sorting crops, re-filtering look-alikes of
 your rejects) stays inside this tool and never changes Frigate.
 
+### What to label
+
+Frigate's own [training guidance](https://docs.frigate.video/configuration/face_recognition)
+boils down to "few, clear, varied" faces per person:
+
+- **Assign** clear, front-facing faces that Frigate got wrong, called unknown or
+  scored low. Add slightly off-angle ones only once a person is recognised well.
+- **Skip faces Frigate already recognises confidently.** Each card shows Frigate's
+  own score next to its guess (`Frigate: Anna 93%`), and a card at 90% or more says
+  so: training it adds little and pushes towards over-fitting. Clear those with 🗑.
+- **🗑 (delete)** real faces that are too poor to train: blurry, cropped to a
+  nose and mouth, side views, heavy shadow. It removes the shot from Frigate and
+  from this tool without teaching anything. The **auto-discard quality** setting
+  does this for you below the score you choose.
+- **Not a face** only for things that are not faces at all (a wheel, a shadow, a
+  sign). It is stored as a negative example and checked *before* person matching,
+  so marking real but blurry faces this way can hide later crops of that person.
+
 ### What the settings affect
 
 Everything in **Settings** governs only this companion's curation: how it sorts
